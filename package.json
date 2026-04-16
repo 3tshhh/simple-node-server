@@ -1,0 +1,34 @@
+{
+  "name": "simple_node_server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "tsc &&node dist/index.js",
+    "push": "bash scripts/push-and-pr.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3tshhh/simple-node-server.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/3tshhh/simple-node-server/issues"
+  },
+  "homepage": "https://github.com/3tshhh/simple-node-server#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
+    "prettier": "^3.8.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,143 @@
+name: Deploy to EC2
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: simple-node-server
+  CONTAINER_NAME: simple-node-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract version from tag
+        id: version
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                        -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to EC2
+        id: deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Login to ECR
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+              docker login --username AWS --password-stdin ${{ steps.ecr-login.outputs.registry }}
+
+            IMAGE="${{ steps.build.outputs.IMAGE }}"
+
+            # Pull new image
+            docker pull $IMAGE
+
+            # Stop and remove old container (if running)
+            docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+            docker rm ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+
+            # Run new container
+            docker run -d \
+              --name ${{ env.CONTAINER_NAME }} \
+              --restart unless-stopped \
+              -p 127.0.0.1:3000:3000 \
+              $IMAGE
+
+            # Clean up old images
+            docker image prune -f
+
+      - name: Health check
+        run: |
+          echo "Waiting for container to start..."
+          sleep 10
+
+          for i in $(seq 1 5); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://${{ secrets.EC2_HOST }}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Attempt $i: status $STATUS, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Health check failed after 5 attempts"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure() && steps.deploy.outcome == 'success'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "Rolling back..."
+
+            # Get the previous image
+            PREV_IMAGE=$(docker images --format '{{.Repository}}:{{.Tag}}' | \
+              grep ${{ env.ECR_REPOSITORY }} | grep -v latest | sed -n '2p')
+
+            if [ -n "$PREV_IMAGE" ]; then
+              docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+              docker rm ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+              docker run -d \
+                --name ${{ env.CONTAINER_NAME }} \
+                --restart unless-stopped \
+                -p 127.0.0.1:3000:3000 \
+                $PREV_IMAGE
+              echo "Rolled back to $PREV_IMAGE"
+            else
+              echo "No previous image found to rollback to"
+            fi
+
+      - name: Notify Discord - Success
+        if: success()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "Deployed ${{ steps.version.outputs.TAG }}"
+          description: "Successfully deployed to EC2"
+          color: 0x00ff00
+
+      - name: Notify Discord - Failure
+        if: failure()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "Deploy Failed - ${{ steps.version.outputs.TAG }}"
+          description: "Deployment failed and rolled back"
+          color: 0xff0000
