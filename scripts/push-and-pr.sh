@@ -20,6 +20,15 @@ if [ -z "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# Get current version from package.json and bump patch
+CURRENT_VERSION=$(node -p "require('./package.json').version")
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+
+echo -e "Current version: ${YELLOW}${CURRENT_VERSION}${NC}"
+echo -e "New version:     ${GREEN}${NEW_VERSION}${NC}"
+echo ""
+
 # Prompt for commit message
 echo "Staged and unstaged changes:"
 git status --short
@@ -31,9 +40,12 @@ if [ -z "$COMMIT_MSG" ]; then
   exit 1
 fi
 
+# Bump version in package.json (no git tag from npm)
+npm version "$NEW_VERSION" --no-git-tag-version > /dev/null
+
 # Add, commit, push
 git add -A
-git commit -m "$COMMIT_MSG"
+git commit -m "$COMMIT_MSG (v$NEW_VERSION)"
 git push origin dev
 
 # Check if a PR already exists for dev -> main
@@ -46,7 +58,7 @@ if [ -n "$EXISTING_PR" ]; then
 else
   echo ""
   echo -e "${GREEN}Opening PR to main...${NC}"
-  gh pr create --base main --head dev --title "$COMMIT_MSG" --fill
+  gh pr create --base main --head dev --title "$COMMIT_MSG (v$NEW_VERSION)" --fill
 fi
 
-echo -e "${GREEN}Done!${NC}"
+echo -e "${GREEN}Done! Version bumped to v${NEW_VERSION}${NC}"

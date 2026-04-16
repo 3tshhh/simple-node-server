@@ -1,13 +1,13 @@
 {
   "name": "simple_node_server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
     "start": "tsc &&node dist/index.js",
-    "push": "bash scripts/push-and-pr.sh"
+    "push": "\"C:/Program Files/Git/bin/bash.exe\" scripts/push-and-pr.sh"
   },
   "repository": {
     "type": "git",
