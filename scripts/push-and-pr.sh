@@ -4,6 +4,7 @@ set -e
 # Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
 
 # Ensure we're on dev
@@ -35,9 +36,17 @@ git add -A
 git commit -m "$COMMIT_MSG"
 git push origin dev
 
-# Open PR to main
-echo ""
-echo -e "${GREEN}Opening PR to main...${NC}"
-gh pr create --base main --head dev --title "$COMMIT_MSG" --fill
+# Check if a PR already exists for dev -> main
+EXISTING_PR=$(gh pr list --head dev --base main --state open --json number --jq '.[0].number' 2>/dev/null || true)
+
+if [ -n "$EXISTING_PR" ]; then
+  echo ""
+  echo -e "${YELLOW}PR #${EXISTING_PR} already exists — pushed new changes to it.${NC}"
+  echo -e "${GREEN}CI will re-run automatically.${NC}"
+else
+  echo ""
+  echo -e "${GREEN}Opening PR to main...${NC}"
+  gh pr create --base main --head dev --title "$COMMIT_MSG" --fill
+fi
 
 echo -e "${GREEN}Done!${NC}"
